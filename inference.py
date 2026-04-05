@@ -1,15 +1,22 @@
 import argparse
 import json
 import os
+import random
 from tasks import get_easy_task, get_medium_task, get_hard_task
 from interface import HomeAction
-from policy import choose_action
 
-# These are the variables the hackathon system looks for (from your screenshot)
+# These are the variables the hackathon system looks for
 API_BASE_URL = os.getenv("API_BASE_URL", "https://api.openai.com/v1")
 MODEL_NAME = os.getenv("MODEL_NAME", "gpt-4o-mini")
 HF_TOKEN = os.getenv("HF_TOKEN")
 
+def choose_action(obs):
+    """Energy-aware baseline policy: logic integrated directly."""
+    if obs.current_temp > 23:
+        return 1  # Cool
+    elif obs.current_temp < 21:
+        return 2  # Heat
+    return 0      # Do nothing
 
 def select_task(difficulty: str):
     if difficulty == "easy":
@@ -17,7 +24,6 @@ def select_task(difficulty: str):
     if difficulty == "medium":
         return get_medium_task
     return get_hard_task
-
 
 def emit_log(payload, json_mode=False, log_file=None):
     if json_mode:
@@ -27,26 +33,30 @@ def emit_log(payload, json_mode=False, log_file=None):
             log_file.write(line + "\n")
             log_file.flush()
         return
-
+    
     message_type = payload.get("type")
     if message_type == "step":
         print(
             f"STEP {payload['step']}: action={payload['action']}, "
-            f"temp={payload['temp']}, home={payload['home']}, "
-            f"price={payload['price']}, reward={payload['reward']}"
+            f"temp={payload['temp']:.2f}, home={payload['home']}, "
+            f"price={payload['price']:.2f}, reward={payload['reward']:.2f}"
         )
     elif message_type == "summary":
         print(f"TOTAL_REWARD: {payload['total_reward']}")
 
-
 def run_inference(difficulty="easy", steps=24, seed=42, json_mode=False, jsonl_path=None):
     """Run the environment using a deterministic, energy-aware baseline policy."""
     print("START")
-    env = select_task(difficulty)(seed=seed)
+    # Note: Added error handling in case tasks don't accept seed yet
+    try:
+        env = select_task(difficulty)(seed=seed)
+    except TypeError:
+        env = select_task(difficulty)()
+        
     obs = env.reset()
     log_file = open(jsonl_path, "a", encoding="utf-8") if jsonl_path else None
-
     total_reward = 0.0
+    
     try:
         emit_log(
             {
@@ -59,12 +69,10 @@ def run_inference(difficulty="easy", steps=24, seed=42, json_mode=False, jsonl_p
             json_mode=json_mode,
             log_file=log_file,
         )
-
         for i in range(steps):
             action = choose_action(obs)
             obs, reward = env.step(HomeAction(action_code=action))
             total_reward += reward
-
             emit_log(
                 {
                     "type": "step",
@@ -78,7 +86,6 @@ def run_inference(difficulty="easy", steps=24, seed=42, json_mode=False, jsonl_p
                 json_mode=json_mode,
                 log_file=log_file,
             )
-
         emit_log(
             {"type": "summary", "total_reward": round(total_reward, 3)},
             json_mode=json_mode,
@@ -87,9 +94,7 @@ def run_inference(difficulty="easy", steps=24, seed=42, json_mode=False, jsonl_p
     finally:
         if log_file:
             log_file.close()
-
     print("END")
-
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run SmartHome environment inference.")
@@ -99,6 +104,7 @@ if __name__ == "__main__":
     parser.add_argument("--json", action="store_true", help="Emit structured JSON logs to stdout.")
     parser.add_argument("--jsonl-path", type=str, default=None, help="Optional file path for JSONL logs.")
     args = parser.parse_args()
+    
     run_inference(
         difficulty=args.difficulty,
         steps=args.steps,

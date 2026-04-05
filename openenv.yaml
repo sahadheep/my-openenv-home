@@ -1,0 +1,8 @@
+name: "SmartHomeEnergySaver"
+version: "1.0.0"
+description: "A utility environment for balancing home climate comfort with energy costs."
+author: "SAHADHEEP"
+entry_points:
+  easy: "tasks:get_easy_task"
+  medium: "tasks:get_medium_task"
+  hard: "tasks:get_hard_task"
